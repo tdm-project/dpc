@@ -1,0 +1,56 @@
+version: "3"
+
+services:
+
+
+  timescaledb:
+    image: tdmproject/tdmq-db
+    ports:
+      - "5432"
+    environment:
+      - POSTGRES_DB=tdmqtest
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=foobar
+      - START_DB=true
+      - POSTGRES_RUN_MIGRATIONS=true
+    healthcheck:
+        test: [ "CMD", "pg_isready", "--username=postgres" ]
+        interval: "15s"
+        retries: 5
+
+
+  web:
+    # Remember that this service is using its default configuration
+    # to access the database, so the settings must match the environment
+    # configuration set for timescaledb above.
+    image: tdmproject/tdmq
+    depends_on:
+      - "timescaledb"
+    ports:
+      - "8000:8000"
+    #DEV user: 1000:1000
+    environment:
+    - "CREATE_DB=false"
+    - "DEV=false"
+    #DEV volumes:
+    #DEV - "/home/mauro/projects/tdm-polystore/tdmq:/tdmq-dist/tdmq"
+
+  namenode:
+    image: crs4/namenode:3.2.0
+    ports:
+      - "8020:8020"
+      - "9870:9870"
+      - "9871:9871"
+
+  datanode:
+    image: crs4/datanode:3.2.0
+    ports:
+      - "9864:9864"
+      - "9865:9865"
+      - "9866:9866"
+      - "9867:9867"
+    environment:
+      - NAMENODE_HOSTNAME=namenode
+
+
+
