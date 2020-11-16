@@ -30,8 +30,6 @@ services:
     environment:
       - "CREATE_DB=false"
       - "DEV=true"
-    volumes:
-    - "/home/mauro/projects/tdm-polystore/tdmq:/tdmq-dist/tdmq"
 
   minio:
     image: minio/minio
