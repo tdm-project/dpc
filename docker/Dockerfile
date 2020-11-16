@@ -1,0 +1,9 @@
+FROM tdmproject/tdmqc
+ENV DPC_HOME /opt/dpc
+
+COPY dpc $DPC_HOME
+WORKDIR $DPC_HOME
+
+RUN pip3 install -r requirements.txt
+
+ENTRYPOINT ["/entrypoint.sh", "fake_user.sh", "python3", "ingest.py"]

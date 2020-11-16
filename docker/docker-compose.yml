@@ -1,0 +1,52 @@
+version: "3"
+
+services:
+
+  timescaledb:
+    image: tdmproject/tdmq-db
+    ports:
+      - "5432"
+    environment:
+      - POSTGRES_DB=tdmqtest
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=foobar
+      - START_DB=true
+      - POSTGRES_RUN_MIGRATIONS=true
+    healthcheck:
+      test: [ "CMD", "pg_isready", "--username=postgres" ]
+      interval: "15s"
+      retries: 5
+
+  web:
+    # Remember that this service is using its default configuration
+    # to access the database, so the settings must match the environment
+    # configuration set for timescaledb above.
+    image: tdmproject/tdmq
+    depends_on:
+      - "timescaledb"
+    ports:
+      - "8000:8000"
+    user: 1000:1000
+    environment:
+      - "CREATE_DB=false"
+      - "DEV=true"
+    volumes:
+    - "/home/mauro/projects/tdm-polystore/tdmq:/tdmq-dist/tdmq"
+
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+    env_file: &env_file
+      - settings.conf
+    environment:
+      - MINIO_BROWSER=off
+      - MINIO_HTTP_TRACE=/dev/stderr
+    command: server /data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+
