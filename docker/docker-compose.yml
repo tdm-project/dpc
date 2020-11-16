@@ -2,7 +2,6 @@ version: "3"
 
 services:
 
-
   timescaledb:
     image: tdmproject/tdmq-db
     ports:
@@ -14,10 +13,9 @@ services:
       - START_DB=true
       - POSTGRES_RUN_MIGRATIONS=true
     healthcheck:
-        test: [ "CMD", "pg_isready", "--username=postgres" ]
-        interval: "15s"
-        retries: 5
-
+      test: [ "CMD", "pg_isready", "--username=postgres" ]
+      interval: "15s"
+      retries: 5
 
   web:
     # Remember that this service is using its default configuration
@@ -28,29 +26,27 @@ services:
       - "timescaledb"
     ports:
       - "8000:8000"
-    #DEV user: 1000:1000
+    user: 1000:1000
     environment:
-    - "CREATE_DB=false"
-    - "DEV=false"
-    #DEV volumes:
-    #DEV - "/home/mauro/projects/tdm-polystore/tdmq:/tdmq-dist/tdmq"
+      - "CREATE_DB=false"
+      - "DEV=true"
+    volumes:
+    - "/home/mauro/projects/tdm-polystore/tdmq:/tdmq-dist/tdmq"
 
-  namenode:
-    image: crs4/namenode:3.2.0
+  minio:
+    image: minio/minio
     ports:
-      - "8020:8020"
-      - "9870:9870"
-      - "9871:9871"
-
-  datanode:
-    image: crs4/datanode:3.2.0
-    ports:
-      - "9864:9864"
-      - "9865:9865"
-      - "9866:9866"
-      - "9867:9867"
+      - "9000:9000"
+    env_file: &env_file
+      - settings.conf
     environment:
-      - NAMENODE_HOSTNAME=namenode
-
+      - MINIO_BROWSER=off
+      - MINIO_HTTP_TRACE=/dev/stderr
+    command: server /data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
 
 
