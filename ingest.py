@@ -12,7 +12,7 @@ import tifffile as tiff
 from clize import parameters, run
 from tdmq.client import Client
 
-
+logger = None
 dpc_url = \
     'http://www.protezionecivile.gov.it/wide-api/wide/product/downloadProduct'
 
@@ -30,9 +30,11 @@ def extract_data(tif):
 def gather_data(t, field):
     # FIXME either datetime or np.datetime64[*]
     t = t if isinstance(t, datetime) else t.tolist()
+    logger.debug('time %s', t)
     product_date = math.floor(t.timestamp() * 1000)
     payload = {'productType': field, 'productDate': product_date}
-    print(dpc_url, payload)
+    logger.debug('dpc_url %s', dpc_url)
+    logger.debug('payload %s', payload)
     r = requests.post(dpc_url, json=payload)
     if r.status_code != 200:
         raise ValueError(f"Bad return code: {r.status_code}")
@@ -123,6 +125,7 @@ def main(source: parameters.one_of('radar', 'temperature'),
 
     for t in to_be_filled:
         t = t if isinstance(t, datetime) else t.tolist()
+        t = t.replace(minute=0, second=0)
         data = {}
         for f in s.controlled_properties:
             data[f] = fetch_dpc_data(s, t, f)
