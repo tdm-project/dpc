@@ -47,4 +47,15 @@ services:
       timeout: 20s
       retries: 3
 
+  tdmq-jupyter:
+    image: tdmproject/tdmqj
+    ports:
+      - "8888:8888"
+    volumes:
+      - "../notebook.ipynb:/home/jovyan/notebook.ipynb"
+    env_file: *env_file
+    environment:
+      - NB_UID=1000
+      - NB_GID=1000
+      - JUPYTER_ENABLE_LAB=yes
 
