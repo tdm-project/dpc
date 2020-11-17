@@ -4,7 +4,9 @@ This repo contains the code for ingesting data from Protezione Civile (temperatu
 ## Example
 Let's ingest radar data from Protezione Civile. First of all, start up the services:
 
+```
   docker-compose -f docker/docker-compose.yml up -d
+```
 
 Then create the bucket:
   
@@ -13,6 +15,6 @@ Then create the bucket:
 ```
 Finally, run the ingestor:
 ```
-   docker run --rm --network docker_default   tdmproject/dpc_ingestor -u http://web:8000/api/v0.0 radar
+   docker run --rm --network docker_default   tdmproject/dpc_ingestor -u http://web:8000/api/v0.0 temperature
 ```
 
