@@ -1,3 +1,4 @@
 clize
 dateparser
 tifffile
+requests
