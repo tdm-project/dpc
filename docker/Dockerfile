@@ -9,4 +9,4 @@ COPY ingest.py $DPC_HOME
 COPY sources $DPC_HOME/sources
 
 
-ENTRYPOINT ["/entrypoint.sh", "fake_user.sh", "python3", "ingest.py"]
+ENTRYPOINT ["python3", "ingest.py"]
