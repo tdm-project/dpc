@@ -92,14 +92,17 @@ def main(source: parameters.one_of('radar', 'temperature'),
          end='now',
          log_level: ('v',
                      parameters.one_of("DEBUG", "INFO", "WARN", "ERROR",
-                                       "CRITICAL")) = 'INFO'):
+                                       "CRITICAL")) = 'INFO',
+         auth_token: str = None):
     setup_logging(log_level)
-
+    logger.info(
+        'ingesting with params source: %s, tdmq_url: %s, start: %s, end: %s',
+        source, tdmq_url, start, end)
     desc = load_desc(source)
 
     dt = timedelta(seconds=desc['description']['acquisition_period'])
 
-    c = Client(tdmq_url)
+    c = Client(tdmq_url, auth_token)
     srcs = c.find_sources({'id': desc['id']})
     if len(srcs) > 0:
         assert len(srcs) == 1
