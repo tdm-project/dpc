@@ -126,20 +126,21 @@ def main(source: parameters.one_of('radar', 'temperature'),
         if len(ts) > 0 else []
     to_be_filled = set(times) - set(filled)
 
-    for t in to_be_filled:
-        t = t if isinstance(t, datetime) else t.tolist()
-        t = t.replace(minute=0, second=0)
-        data = {}
-        for f in s.controlled_properties:
-            data[f] = fetch_dpc_data(s, t, f)
-        slot = int((t - time_base).total_seconds() // dt.total_seconds())
-        logger.info(f"Ingesting data at time {t}, slot {slot}.")
-        try:
-            s.ingest(t, data, slot)
-        except Exception as e:
-            logger.error(
-                'an error occurred when ingesting time %s at slot %s.'
-                'Exception: %s', t, slot, e)
+    with s.array_context('w'):
+        for t in to_be_filled:
+            t = t if isinstance(t, datetime) else t.tolist()
+            t = t.replace(minute=0, second=0)
+            data = {}
+            for f in s.controlled_properties:
+                data[f] = fetch_dpc_data(s, t, f)
+            slot = int((t - time_base).total_seconds() // dt.total_seconds())
+            logger.info(f"Ingesting data at time {t}, slot {slot}.")
+            try:
+                s.ingest(t, data, slot)
+            except Exception as e:
+                logger.error(
+                    'an error occurred when ingesting time %s at slot %s.'
+                    'Exception: %s', t, slot, e)
     logger.info(f"Done ingesting.")
 
 
