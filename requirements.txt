@@ -1,4 +1,3 @@
-clize
-dateparser
+aiohttp[speedups]
+click
 tifffile
-requests
