@@ -20,6 +20,9 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      - name: Docker Pull
+        run: docker pull tdmproject/tdmq-client:latest
+
       - name: Build image
         id: docker_build
         uses: docker/build-push-action@v2
