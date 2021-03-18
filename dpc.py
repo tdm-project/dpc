@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Union
 
 import aiohttp
 import click
-import numpy as np
 import tifffile as tiff
 
 from tdmq.client import Client
@@ -471,11 +470,14 @@ def dpc(ctx, mode: str, tdmq_endpoint: str, tdmq_token: str, override_source_id:
 
 
 @dpc.command()
-@click.option('--batch-size', default=20, type=int)
-@click.option('--max-batches', default=4, type=int)
+@click.option('--batch-size', default=20, envvar='DPC_BATCH_SIZE', type=int, show_default=True,
+              help="Size of batch of products to be concurrently downloaded and then written.")
+@click.option('--max-batches', default=4, envvar='DPC_MAX_BATCHES', type=int, show_default=True,
+              help="Max number of downloaded batches to queue up in memory for writing to the array")
 @click.option('--strictly-after', help="Force the start timestamp for the downloaded products to be downloaded. ISO format.")
+@click.option('--consolidate/--no-consolidate', envvar='DPC_CONSOLIDATE', default=True, show_default=True)
 @click.pass_obj
-def ingest(click_obj, batch_size: int, max_batches: int, strictly_after: str=None) -> None:
+def ingest(click_obj, batch_size: int, max_batches: int, strictly_after: str=None, consolidate: bool=True) -> None:
     """
     Ingest data from the Radar DPC meteorological radar mosaic service into the
     TDM polystore.
@@ -510,6 +512,13 @@ def ingest(click_obj, batch_size: int, max_batches: int, strictly_after: str=Non
 
     asyncio.run(ingest_products(destination=source, strictly_after=last_time,
                                 batch_size=batch_size, max_batches=max_batches))
+
+    logger.info("Finished ingesting.")
+    if consolidate:
+        logger.info("Consolidating array...")
+        source.consolidate()
+
+    logger.info("Operation complete")
 
 @dpc.command()
 @click.pass_obj
