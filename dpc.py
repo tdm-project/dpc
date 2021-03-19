@@ -519,12 +519,11 @@ def ingest(click_obj, batch_size: int, max_batches: int, strictly_after: str=Non
 
     if strictly_after:
         # parse user input.  Set `last_time` variable
-        last_time = datetime.fromisoformat(strictly_after)
-        if last_time.tzinfo is None:
-            last_time = last_time.replace(tzinfo=timezone.utc)
+        strictly_after = datetime.fromisoformat(strictly_after)
+        if strictly_after.tzinfo is None:
+            strictly_after = strictly_after.replace(tzinfo=timezone.utc)
             logger.info("--strictly-after: Time zone not specified.  Assuming UTC")
-        logger.warning("Forcing data download to start after %s instead of latest previously recorded activity",
-                       last_time.isoformat())
+        logger.warning("Clipping data download to start after timestamp %s", strictly_after.isoformat())
 
     logger.info("Ingesting %s products.", ' and '.join(run_conf.products))
 
@@ -532,15 +531,21 @@ def ingest(click_obj, batch_size: int, max_batches: int, strictly_after: str=Non
     # on whether we're running in `temperature` or `precipitation` mode.
     source = fetch_or_register_source(tdmq_client, run_conf)
 
-    if not strictly_after:
-        # User did not provide a strictly_after date.  Set `last_time` variable based on latest activity
-        ts = source.get_latest_activity()
-        if len(ts) > 0:
-            last_time = ts.time[0]
-            logger.info("Last previous activity reported by source: %s.  Appending", last_time.isoformat())
-        else:
-            last_time = None
-            logger.info("No previous activity reported by source.  Ingesting all data available from DPC")
+    ts = source.get_latest_activity()
+    if len(ts) > 0:
+        last_time = ts.time[0]
+        logger.info("Last previous activity reported by source: %s.", last_time.isoformat())
+    else:
+        last_time = None
+        logger.info("No previous activity reported by source.")
+
+    if strictly_after and (not last_time or strictly_after > last_time):
+        # There is previous activity that is previous to strictly_after.  We override
+        # The ingestion start timestamp with the one provided by strictly_after
+        last_time = strictly_after
+        logger.info("Bounding ingestion to %s as specified by --strictly-after option", last_time.isoformat())
+
+    logger.info("Ingesting data starting from %s", last_time.isoformat() if last_time else "infinity")
 
     asyncio.run(ingest_products(destination=source, strictly_after=last_time,
                                 batch_size=batch_size, max_batches=max_batches))
