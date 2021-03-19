@@ -14,9 +14,8 @@ import aiohttp
 import click
 import tifffile as tiff
 
-from tdmq.client import Client
-# TODO: with newest client we should be able to import Source form tdmq.client
-from tdmq.client.sources import Source
+from tdmq.client import Client, Source
+from tdmq.utils import timeit
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +160,25 @@ class DPCclient:
         self._conn = aiohttp.TCPConnector(limit=conn_limit)
         self._session = aiohttp.ClientSession(connector=self._conn,
                                               raise_for_status=True)
+        self._stats = dict.fromkeys((
+            'downloaded_bytes',
+            'downloaded_products',
+            'total_requests'), 0)
+
+    def _count_product(self, data):
+        self._stats['downloaded_bytes'] += len(data)
+        self._stats['downloaded_products'] += 1
+        self._stats['total_requests'] += 1
+
+    def _count_generic_request(self, resp_size):
+        self._stats['downloaded_bytes'] += resp_size
+        self._stats['total_requests'] += 1
+
+
+    @property
+    def stats(self):
+        return self._stats
+
 
     async def close(self):
         await self._session.close()
@@ -180,6 +198,7 @@ class DPCclient:
         url = self.BASE_URL + "findAvaiableProducts"
         async with self._session.get(url) as response:
             data = await response.json()
+            self._count_generic_request(len(data))
             return data['types']
 
 
@@ -196,6 +215,7 @@ class DPCclient:
         url = self.BASE_URL + "findLastProductByType"
         async with self._session.get(url, params={'type': product_type}) as response:
             data = await response.json()
+            self._count_generic_request(len(data))
             if data['total'] > 1:
                 logger.error("Unexpected:  DPC returned %s \"last products\" for %s",
                              data['total'], product_type)
@@ -217,6 +237,7 @@ class DPCclient:
         logger.debug("Sending existsProduct with params %s", params)
         async with self._session.get(url, params=params) as response:
             data = await response.text()
+            self._count_generic_request(len(data))
             return data.lower().strip() == 'true'
 
 
@@ -228,7 +249,8 @@ class DPCclient:
         logger.debug("Sending download request with data %s", request_data)
         async with self._session.post(url, json=request_data, headers=headers) as response:
             data = await response.read()
-            logger.debug("Download complete: %s; %s bytes", request_data, len(data))
+            logger.debug("Download complete: %s; %s bytes", request_data, sizeof_fmt(len(data)))
+            self._count_product(data)
             return data
 
 
@@ -258,6 +280,16 @@ class DPCclient:
             return timedelta(days=int(quantity))
 
         raise ValueError(f"period {period} specifies an unknown unit {unit}")
+
+
+def sizeof_fmt(num, suffix='B'):
+    # Thanks to Sridhar Ratnakumar
+    # https://stackoverflow.com/questions/1094841/get-human-readable-version-of-file-size
+    for unit in ['','Ki','Mi','Gi','Ti','Pi','Ei','Zi']:
+        if abs(num) < 1024.0:
+            return "%3.1f%s%s" % (num, unit, suffix)
+        num /= 1024.0
+    return "%.1f%s%s" % (num, 'Yi', suffix)
 
 
 def extract_data_from_tiff(tif):
