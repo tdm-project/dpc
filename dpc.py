@@ -385,15 +385,17 @@ async def ingest_products(destination: Source, strictly_after: datetime, batch_s
     outstanding_batch_semaphore = asyncio.Semaphore(max_batches)
     outstanding_batches = 0
 
-    async def finalize_batch(batch: Iterable) -> None:
+    async def finalize_batch(batch: Iterable, previous_finalizer: asyncio.Task) -> None:
         nonlocal outstanding_batches
-        logger.debug("finalize batch: acquiring semaphore. ")
+        task_name = asyncio.current_task().get_name()
+        logger.debug("%s: acquiring semaphore. ", task_name)
         async with outstanding_batch_semaphore:
             outstanding_batches += 1
             try:
                 logger.debug("Semaphore acquired.  Outstanding batches %s", outstanding_batches)
-                logger.info("awaiting on %s downloads", len(batch))
+                logger.debug("awaiting on %s downloads", len(batch))
                 downloads_ary = await asyncio.gather(*batch)
+                logger.debug("%s: downloads completed", task_name)
                 logger.info("Downloaded batch of %s images complete", len(batch))
 
                 # Restructure list of dictionaries
@@ -402,8 +404,17 @@ async def ingest_products(destination: Source, strictly_after: datetime, batch_s
                 for p in destination.controlled_properties:
                     products[p] = [ d[p] for d in downloads_ary ]
 
-                logger.debug("Executing Source.insert_many in executor.  "
-                             "Inserting %s timestamps and %s products", len(times), len(products))
+                if previous_finalizer:
+                    # We await on the previous finalizer to ensure our writes happen in order
+                    logger.debug("%s awaiting on finalizing of previous batch %s",
+                                 task_name,
+                                 previous_finalizer.get_name())
+                    await previous_finalizer
+                    logger.debug("%s: Finished awaiting.  Ingesting batch", task_name)
+
+                logger.debug("%s: Executing Source.insert_many in executor.  "
+                             "Inserting %s timestamps and %s products",
+                             task_name, len(times), len(products))
                 # Source.ingest_many is not a coroutine.  We execute it through
                 # `run_in_executor` to avoid blocking the program.
                 loop = asyncio.get_running_loop()
@@ -417,33 +428,44 @@ async def ingest_products(destination: Source, strictly_after: datetime, batch_s
                                 '\n\t'.join(t.isoformat() for t in times))
             finally:
                 outstanding_batches -= 1
-        logger.debug("Semaphore released.  Outstanding batches %s", outstanding_batches)
+        logger.debug("%s: Semaphore released.  Outstanding batches %s",
+                     task_name, outstanding_batches)
 
     dpc_client = DPCclient()
-    try:
-        logger.debug("Created DPCclient")
-        products = destination.controlled_properties
-        task_list = list()
-        batch = list()
-        async for timestamp in gen_product_timestamps(dpc_client, products, strictly_after):
-            logger.debug("appending timestamp %s to batch", timestamp.isoformat())
-            batch.append(download_products_at_ts(dpc_client, products, timestamp))
-            if len(batch) >= batch_size:
-                logger.debug("Created batch of size %s. Passing to finalize", len(batch))
-                task_list.append(asyncio.create_task(finalize_batch(batch)))
-                batch = []
-        if len(batch) > 0:
-            logger.debug("Finalizing last batch; size %s", len(batch))
-            task_list.append(asyncio.create_task(finalize_batch(batch)))
+    with timeit(logger.info, "Total ingestion time: %0.5f seconds"):
+        try:
+            logger.debug("Created DPCclient")
+            products = destination.controlled_properties
+            batch = list()
+            batch_counter = 1
+            last_finalize = None
+            async for timestamp in gen_product_timestamps(dpc_client, products, strictly_after):
+                logger.debug("appending timestamp %s to batch", timestamp.isoformat())
+                batch.append(download_products_at_ts(dpc_client, products, timestamp))
+                if len(batch) >= batch_size:
+                    logger.debug("Created batch of size %s. Passing to finalize", len(batch))
+                    # We chain the calls to finalize_batch, making each call await on the previous
+                    # one.  This enforces a global time order in the products are ingested.
+                    last_finalize = asyncio.create_task(finalize_batch(batch, last_finalize),
+                                                        name=f"finalize_batch_{batch_counter}")
+                    batch = []
+                    batch_counter += 1
+            if len(batch) > 0:
+                logger.debug("Finalizing last batch; size %s", len(batch))
+                last_finalize = asyncio.create_task(finalize_batch(batch, last_finalize),
+                                                    name=f"finalize_batch_{batch_counter}")
 
-        # FIXME:  is there a more elegant way to do this?  We need to make sure the tasks
-        # are finished before closing the DPCclient.
-        # Awaiting on asyncio.all_tasks() creates a deadlock as the task list includes this
-        # coroutine in which we are running.
-        logger.debug("Waiting for all %s tasks to finish", len(task_list))
-        await asyncio.gather(*task_list)
-    finally:
-        await dpc_client.close()
+            if last_finalize:
+                logger.info("Waiting for remaining %s tasks to finish",
+                            sum(1 for t in asyncio.all_tasks() if not t.done()))
+                await last_finalize
+        finally:
+            await dpc_client.close()
+    stats = dpc_client.stats
+    logger.info("Closed DPCclient.  Download stats:")
+    logger.info("\tdownloaded volume: %s", sizeof_fmt(stats['downloaded_bytes']))
+    logger.info("\tdownloaded products: %s", stats['downloaded_products'])
+    logger.info("\ttotal_requests: %s", stats['total_requests'])
 
 
 def fetch_or_register_source(client: Client, run_conf: RunConfig) -> Source:
