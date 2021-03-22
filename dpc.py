@@ -6,13 +6,14 @@ import logging
 import re
 import sys
 
-from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Union
+from functools import wraps
+from typing import Any, Coroutine, Dict, Iterable, List, Tuple, Union
 
 import aiohttp
 import click
 import tifffile as tiff
+import tenacity as ten
 
 from tdmq.client import Client, Source
 from tdmq.utils import timeit
@@ -117,28 +118,38 @@ class RunConfig:
             logger.info("Overriding default base source id. New source id %s", self.source_def['id'])
 
     @property
-    def mode(self):
+    def mode(self) -> str:
         return self._mode
 
     @property
-    def source_def(self):
+    def source_def(self) -> Dict[str, Any]:
         return self._source_cfg['def']
 
     @property
-    def source_id(self):
+    def source_id(self) -> str:
         return self.source_def['id']
 
     @property
-    def source_array_properties(self):
+    def source_array_properties(self) -> Dict[str, Any]:
         return self._source_cfg['array_properties']
 
     @property
-    def products(self):
+    def products(self) -> List[str]:
         return self.source_def['controlledProperties']
 
 
-dpc_url = \
-    'http://www.protezionecivile.gov.it/wide-api/wide/product/downloadProduct'
+def dpc_retry(fn: Coroutine) -> Coroutine:
+    @wraps(fn)
+    @ten.retry(retry=ten.retry_if_exception_type((aiohttp.ClientError,
+                                                  aiohttp.http_exceptions.HttpProcessingError)),
+               reraise=True,
+               wait=ten.wait_random(1,3),
+               stop=ten.stop_after_attempt(3),
+               before_sleep=ten.before_sleep_log(logger, logging.DEBUG))
+    async def wrapped_fn(*args, **kwargs):
+        return await fn(*args, **kwargs)
+
+    return wrapped_fn
 
 mask_value = -9999.0
 
@@ -163,28 +174,33 @@ class DPCclient:
         self._stats = dict.fromkeys((
             'downloaded_bytes',
             'downloaded_products',
+            'missing_products',
             'total_requests'), 0)
 
-    def _count_product(self, data):
+    def _count_product(self, data: bytes) -> None:
         self._stats['downloaded_bytes'] += len(data)
         self._stats['downloaded_products'] += 1
         self._stats['total_requests'] += 1
 
-    def _count_generic_request(self, resp_size):
+    def _count_missing_product(self) -> None:
+        self._stats['missing_products'] += 1
+        self._stats['total_requests'] += 1
+
+    def _count_generic_request(self, resp_size: int) -> None:
         self._stats['downloaded_bytes'] += resp_size
         self._stats['total_requests'] += 1
 
 
     @property
-    def stats(self):
+    def stats(self) -> Dict[str, int]:
         return self._stats
 
 
-    async def close(self):
+    async def close(self) -> None:
         await self._session.close()
         await self._conn.close()
 
-
+    @dpc_retry
     async def available_products(self) -> List[str]:
         # findAvaiableProducts
         # {
@@ -202,6 +218,7 @@ class DPCclient:
             return data['types']
 
 
+    @dpc_retry
     async def latest_product(self, product_type: str) -> Dict[str, Union[str, int]]:
         # findLastproductByType
         # {
@@ -229,6 +246,7 @@ class DPCclient:
             return latest
 
 
+    @dpc_retry
     async def product_exists(self, product_type: str, when: datetime) -> bool:
         # existsProduct
         # API returns a string 'true' or 'false'
@@ -241,6 +259,7 @@ class DPCclient:
             return data.lower().strip() == 'true'
 
 
+    @dpc_retry
     async def download_product(self, product_type: str, when: datetime) -> bytes:
         # downloadProduct
         url = self.BASE_URL + "downloadProduct"
