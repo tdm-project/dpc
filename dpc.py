@@ -558,7 +558,7 @@ async def ingest_products(destination: Source, strictly_after: datetime, batch_s
     logger.info("\ttotal_requests: %s", stats['total_requests'])
 
 
-def fetch_or_register_source(client: Client, run_conf: RunConfig) -> Source:
+def fetch_tdmq_source(client: Client, run_conf: RunConfig) -> Source:
     sources = client.find_sources(args={'id': run_conf.source_id})
     if len(sources) > 1:
         raise RuntimeError(f"Bug?  Got {len(sources)} sources from tdmq query "
@@ -568,9 +568,14 @@ def fetch_or_register_source(client: Client, run_conf: RunConfig) -> Source:
         source = sources[0]
         logger.info("Found existing source with tdmq_id %s", source.tdmq_id)
     else:
-        logger.info("Source not found in polystore.  Registering it now...")
-        source = client.register_source(run_conf.source_def, properties=run_conf.source_array_properties)
-        logger.info("New source registered with tdmq_id %s", source.tdmq_id)
+        source = None
+
+    return source
+
+
+def register_tdmq_source(client: Client, run_conf: RunConfig) -> Source:
+    source = client.register_source(run_conf.source_def, properties=run_conf.source_array_properties)
+    logger.info("New source registered with tdmq_id %s", source.tdmq_id)
 
     return source
 
@@ -620,14 +625,14 @@ def dpc(ctx, mode: str, tdmq_endpoint: str, tdmq_token: str, override_source_id:
               help="Max number of downloaded batches to queue up in memory for writing to the array")
 @click.option('--strictly-after', help="Force the start timestamp for the downloaded products to be downloaded. ISO format.")
 @click.option('--consolidate/--no-consolidate', envvar='DPC_CONSOLIDATE', default=True, show_default=True)
-@click.pass_obj
-def ingest(click_obj, batch_size: int, max_batches: int, strictly_after: str=None, consolidate: bool=True) -> None:
+@click.pass_context
+def ingest(click_ctx, batch_size: int, max_batches: int, strictly_after: str=None, consolidate: bool=True) -> None:
     """
     Ingest data from the Radar DPC meteorological radar mosaic service into the
     TDM polystore.
     """
-    run_conf = click_obj['run_conf']
-    tdmq_client = click_obj['tdmq_client']
+    run_conf = click_ctx.obj['run_conf']
+    tdmq_client = click_ctx.obj['tdmq_client']
 
     if strictly_after:
         # parse user input.  Set `last_time` variable
@@ -641,7 +646,11 @@ def ingest(click_obj, batch_size: int, max_batches: int, strictly_after: str=Non
 
     # Fetch or register the TDMq Source.  The source will be different depending
     # on whether we're running in `temperature` or `precipitation` mode.
-    source = fetch_or_register_source(tdmq_client, run_conf)
+    source = fetch_tdmq_source(tdmq_client, run_conf)
+    if not source:
+        source = register_tdmq_source(tdmq_client, run_conf)
+    elif strictly_after:
+        click_ctx.fail("Can't specify --strictly-after on an existing source!")
 
     ts = source.get_latest_activity()
     if len(ts) > 0:
@@ -669,6 +678,7 @@ def ingest(click_obj, batch_size: int, max_batches: int, strictly_after: str=Non
 
     logger.info("Operation complete")
 
+
 @dpc.command()
 @click.pass_obj
 def register_source(click_obj) -> None:
@@ -680,7 +690,9 @@ def register_source(click_obj) -> None:
 
     # Fetch or register the TDMq Source.  The source will be different depending
     # on whether we're running in `temperature` or `precipitation` mode.
-    fetch_or_register_source(tdmq_client, run_conf)
+    source = fetch_tdmq_source(tdmq_client, run_conf)
+    if not source:
+        register_tdmq_source(tdmq_client, run_conf)
 
 
 @dpc.command()
