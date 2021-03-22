@@ -19,7 +19,7 @@ import tenacity as ten
 from tdmq.client import Client, Source
 from tdmq.utils import timeit
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("DPC")
 
 TempSource = {
     "id": "dpc/meteo-mosaic/v0/temperature",
@@ -168,6 +168,7 @@ class DPCclient:
         'http://www.protezionecivile.gov.it/wide-api/wide/product/'
 
     def __init__(self, conn_limit: int=4):
+        self._logger = logging.getLogger("DPCclient")
         self._conn = aiohttp.TCPConnector(limit=conn_limit)
         self._session = aiohttp.ClientSession(connector=self._conn,
                                               raise_for_status=True)
@@ -234,9 +235,9 @@ class DPCclient:
             data = await response.json()
             self._count_generic_request(len(data))
             if data['total'] > 1:
-                logger.error("Unexpected:  DPC returned %s \"last products\" for %s",
-                             data['total'], product_type)
-                logger.error("Data: %s", data)
+                self._logger.error("Unexpected:  DPC returned %s \"last products\" for %s",
+                                   data['total'], product_type)
+                self._logger.error("Data: %s", data)
             if data['total'] == 0:
                 return None
 
@@ -252,7 +253,7 @@ class DPCclient:
         # API returns a string 'true' or 'false'
         url = self.BASE_URL + "existsProduct"
         params = {'type': product_type, 'time': self._dt_to_timestamp(when)}
-        logger.debug("Sending existsProduct with params %s", params)
+        self._logger.debug("Sending existsProduct with params %s", params)
         async with self._session.get(url, params=params) as response:
             data = await response.text()
             self._count_generic_request(len(data))
@@ -265,7 +266,7 @@ class DPCclient:
         url = self.BASE_URL + "downloadProduct"
         request_data = {'productType': product_type, 'productDate': self._dt_to_timestamp(when)}
         headers = {'Content-Type': 'application/json'}
-        logger.debug("Sending download request with data %s", request_data)
+        self._logger.debug("Sending download request with data %s", request_data)
         try:
             async with self._session.post(url, json=request_data, headers=headers, raise_for_status=False) as response:
                 data = await response.read()
@@ -279,19 +280,19 @@ class DPCclient:
                         #   'The File for Product Type VMI is null or not exist.'
                         if 'is null' in content['gpRestExceptionMessage']['message'] or \
                            'not exist' in content['gpRestExceptionMessage']['message']:
-                            logger.info("Product %s for timestamp %s not present", request_data['productType'], when.isoformat())
+                            self._logger.info("Product %s for timestamp %s not present", request_data['productType'], when.isoformat())
                             self._count_missing_product()
                             return None
                     # else
-                    logger.error("Download attempt error. Status: %s; response: %s", response.status, content)
+                    self._logger.error("Download attempt error. Status: %s; response: %s", response.status, content)
                     response.raise_for_status() # kicks the exception to the handler below
                 else:
-                    logger.debug("Download complete: %s; %s bytes", request_data, sizeof_fmt(len(data)))
+                    self._logger.debug("Download complete: %s; %s bytes", request_data, sizeof_fmt(len(data)))
                     self._count_product(data)
                     return data
         except aiohttp.client_exceptions.ClientResponseError as e:
-            logger.error("Failed to download product: %s", request_data)
-            logger.exception(e)
+            self._logger.error("Failed to download product: %s", request_data)
+            self._logger.exception(e)
             raise
 
 
@@ -548,8 +549,8 @@ async def ingest_products(destination: Source, strictly_after: datetime, batch_s
                                                     name=f"finalize_batch_{batch_counter}")
 
             if last_finalize:
-                logger.info("Waiting for remaining %s tasks to finish",
-                            sum(1 for t in asyncio.all_tasks() if not t.done()))
+                logger.info("Waiting for download and ingestion tasks to finish")
+                logger.debug("%s tasks are not yet done", sum(1 for t in asyncio.all_tasks() if not t.done()))
                 await last_finalize
         finally:
             await dpc_client.close()
@@ -585,7 +586,7 @@ def register_tdmq_source(client: Client, run_conf: RunConfig) -> Source:
 
 def configure_logging(log_level: str) -> None:
     level = getattr(logging, log_level)
-    log_format = '[%(asctime)s] %(levelname)s:  %(message)s'
+    log_format = '[%(asctime)s] %(name)s %(levelname)s:  %(message)s'
     logging.basicConfig(level=level, format=log_format)
 
 
