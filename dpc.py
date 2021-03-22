@@ -305,6 +305,9 @@ class DPCclient:
 
     @staticmethod
     def _period_to_timedelta(period: str) -> timedelta:
+        """
+        Parse the period string reported by the DPC service and return it as a timedelta.
+        """
         # These are the different periods I've seen from the service: 'PT1H' 'PT5M'
         # We deduce the format is 'PT' + quantity + units, where unit can be
         # M for minutes, H for hours (perhaps D for days)
@@ -618,6 +621,31 @@ def dpc(ctx, mode: str, tdmq_endpoint: str, tdmq_token: str, override_source_id:
     logger.debug("dpc finished.  Continuing in subcommand (if any)")
 
 
+############################ High-level overview ###############################
+# `ingest` is the entry point of the download and ingest process.
+# This functions sets up the the work, then calls the ingest_products
+# coroutine to actually do the work.
+#
+# ingest_products:
+#   * Uses the gen_product_timestamps() generator to create the timestamps of the
+#     products to be downloaded, in order.
+#   * Iterates over these timestamps and, for each one, creates a download task
+#     implemented by download_products_at_ts.
+#   * These download tasks get put in batches.
+#   * Each batch is passed to a call to finalize_batch, which awaits them and then
+#     ingests their output.
+#   * To enforce write order, each batch awaits on the previous one.
+#
+# Task dependency summary
+#
+# ingest_products -> last finalize_batch -> second-last finalize_batch -> ... -> first finalize_batch
+#
+# each finalize_batch -> download_products_at_ts -> dpc_client.download_product
+#                                                -> dpc_client.download_product
+#                     -> download_products_at_ts -> dpc_client.download_product
+#                                                -> dpc_client.download_product
+# and so on.
+################################################################################
 @dpc.command()
 @click.option('--batch-size', default=20, envvar='DPC_BATCH_SIZE', type=int, show_default=True,
               help="Size of batch of products to be concurrently downloaded and then written.")
