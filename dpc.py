@@ -12,6 +12,7 @@ from typing import Any, Coroutine, Dict, Iterable, List, Tuple, Union
 
 import aiohttp
 import click
+import numpy as np
 import tifffile as tiff
 import tenacity as ten
 
@@ -151,7 +152,6 @@ def dpc_retry(fn: Coroutine) -> Coroutine:
 
     return wrapped_fn
 
-mask_value = -9999.0
 
 class DPCclient:
     """
@@ -266,11 +266,33 @@ class DPCclient:
         request_data = {'productType': product_type, 'productDate': self._dt_to_timestamp(when)}
         headers = {'Content-Type': 'application/json'}
         logger.debug("Sending download request with data %s", request_data)
-        async with self._session.post(url, json=request_data, headers=headers) as response:
-            data = await response.read()
-            logger.debug("Download complete: %s; %s bytes", request_data, sizeof_fmt(len(data)))
-            self._count_product(data)
-            return data
+        try:
+            async with self._session.post(url, json=request_data, headers=headers, raise_for_status=False) as response:
+                data = await response.read()
+                if response.status >= 400:
+                    # Error
+                    content = await response.json()
+                    if response.status == 500:
+                        # The DPC service returns status code 500 when it doesn't find what you're looking for,
+                        # so we handle this code specifically.
+                        # the message when the product is missing looks like:
+                        #   'The File for Product Type VMI is null or not exist.'
+                        if 'is null' in content['gpRestExceptionMessage']['message'] or \
+                           'not exist' in content['gpRestExceptionMessage']['message']:
+                            logger.info("Product %s for timestamp %s not present", request_data['productType'], when.isoformat())
+                            self._count_missing_product()
+                            return None
+                    # else
+                    logger.error("Download attempt error. Status: %s; response: %s", response.status, content)
+                    response.raise_for_status() # kicks the exception to the handler below
+                else:
+                    logger.debug("Download complete: %s; %s bytes", request_data, sizeof_fmt(len(data)))
+                    self._count_product(data)
+                    return data
+        except aiohttp.client_exceptions.ClientResponseError as e:
+            logger.error("Failed to download product: %s", request_data)
+            logger.exception(e)
+            raise
 
 
     @staticmethod
@@ -314,9 +336,6 @@ def sizeof_fmt(num, suffix='B'):
 def extract_data_from_tiff(tif):
     page = tif.pages[0]
     data = page.asarray()
-    ## zeroout nan, force mask value to -9999.0
-    #data[np.isnan(data)] = mask_value
-    #return page.geotiff_tags, data
     return data
 
 
@@ -328,8 +347,15 @@ async def download_products_at_ts(dpc_client: DPCclient,
     retval = dict(timestamp=ts)
     downloads = await asyncio.gather(*(dpc_client.download_product(p, ts) for p in products))
     for p, data in zip(products, downloads):
-        with io.BytesIO(data) as f:
-            retval[p] = extract_data_from_tiff(tiff.TiffFile(f))
+        tiff_data = None
+        # If the download failed in a non-exceptional way, dpc_client.download_product
+        # returns None; we propagate this None up the call chain.  If the download error
+        # was unexpected the function will raise an error that that will be handled
+        # at a higher level.
+        if data is not None:
+            with io.BytesIO(data) as f:
+                tiff_data = extract_data_from_tiff(tiff.TiffFile(f))
+        retval[p] = tiff_data
     return retval
 
 
@@ -400,6 +426,51 @@ async def gen_product_timestamps(dpc_client: DPCclient, products: Union[List, tu
         ts += period
 
 
+def restructure_download_results(destination: Source, downloads: Iterable[Dict[str, Any]]) -> Tuple[List, List]:
+    """
+    Each invocation of download_products_at_ts in the batch will return a
+    dict with a key 'timestamp' plus one key for each product.
+    If a product was not available for download, its value will be None.
+    E.g.,
+
+        { 'timestamp': datetime(xxxx),
+           'TEMP': np.array,
+           'VMI': None
+        }
+
+    This function restructures this data for writing to the TDM-polystore client:
+
+        times = [ n timestamps ]
+        products = {
+            'TEMP': [ n arrays ],
+            'VMI': [ n arrays ]
+        }
+
+    The times and products arrays will always have the same length.
+    If a timestamp dictionary contained no data, it will be skipped, so the output
+    arrays may be smaller than the input `downloads` array.
+
+    If only one of a number of products for a timestamp is None, then it will be
+    replaced by a NaN-filled numpy array.
+    """
+    times = []
+    products = dict((p, []) for p in destination.controlled_properties)
+    for d in downloads:
+        # If all products are None, we skip this timestamp altogether.
+        # Otherwise:
+        if any(d[p] is not None for p in destination.controlled_properties):
+            times.append(d['timestamp'])
+            for p in destination.controlled_properties:
+                if d[p] is not None:
+                    value = d[p]
+                else:
+                    value = np.empty(destination.shape)
+                    value.fill(np.nan)
+                products[p].append(value)
+    return times, products
+
+
+
 async def ingest_products(destination: Source, strictly_after: datetime, batch_size: int=20, max_batches: int=4) -> None:
     outstanding_batch_semaphore = asyncio.Semaphore(max_batches)
     outstanding_batches = 0
@@ -413,15 +484,14 @@ async def ingest_products(destination: Source, strictly_after: datetime, batch_s
             try:
                 logger.debug("Semaphore acquired.  Outstanding batches %s", outstanding_batches)
                 logger.debug("awaiting on %s downloads", len(batch))
+                # Each invocation of download_products_at_ts in the batch will return a
+                # dict with a key 'timestamp' plus one key for each product.  If a product
+                # was not available for download, its value will be None.
                 downloads_ary = await asyncio.gather(*batch)
                 logger.debug("%s: downloads completed", task_name)
                 logger.info("Downloaded batch of %s images complete", len(batch))
 
-                # Restructure list of dictionaries
-                times = [ d['timestamp'] for d in downloads_ary ]
-                products = {}
-                for p in destination.controlled_properties:
-                    products[p] = [ d[p] for d in downloads_ary ]
+                times, products = restructure_download_results(destination, downloads_ary)
 
                 if previous_finalizer:
                     # We await on the previous finalizer to ensure our writes happen in order
@@ -484,6 +554,7 @@ async def ingest_products(destination: Source, strictly_after: datetime, batch_s
     logger.info("Closed DPCclient.  Download stats:")
     logger.info("\tdownloaded volume: %s", sizeof_fmt(stats['downloaded_bytes']))
     logger.info("\tdownloaded products: %s", stats['downloaded_products'])
+    logger.info("\tmissing products: %s", stats['missing_products'])
     logger.info("\ttotal_requests: %s", stats['total_requests'])
 
 
