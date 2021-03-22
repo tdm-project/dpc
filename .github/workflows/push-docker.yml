@@ -20,9 +20,6 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
-      - name: Docker Pull
-        run: docker pull tdmproject/tdmq-client:latest
-
       - name: Build image
         id: docker_build
         uses: docker/build-push-action@v2
@@ -35,14 +32,25 @@ jobs:
       - name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}
 
-      - name: Test
+      - name: Fetch tdmq-polystore
         run: |
           wget -O docker/docker-compose.base.yml https://raw.githubusercontent.com/tdm-project/tdm-polystore/develop/docker/docker-compose.base.yml
+          wget -O docker/settings.conf https://raw.githubusercontent.com/tdm-project/tdm-polystore/develop/docker/settings.conf
+
+      - name: Test
+        run: |
           source docker/settings.conf
           docker-compose -f docker/docker-compose.base.yaml up -d
-          docker run --rm --network tdmq dpc_ingestor:${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
-            ${IMAGE_NAME} --log-level DEBUG --strictly-after $(date -d '1 hour ago' --iso-8601=minutes) temperature \
-            http://web:8000/api/v0.0/ "${TDMQ_AUTH_TOKEN}" ingest
+          # wait for the services to become healthy
+          for i in {1..30}; do
+            wget -O /dev/null http://localhost:8000/api/v0.0/entity_types && break
+            echo "Waiting for TDMq to become ready..."
+            sleep 1
+          done
+          echo "Running DPC ingestor"
+          docker run --rm --network docker_tdmq ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+            --log-level DEBUG temperature \
+            http://web:8000/api/v0.0/ "${TDMQ_AUTH_TOKEN}" ingest --strictly-after $(date -d '1 hour ago' --iso-8601=minutes --utc)
 
       - name: Login to DockerHub
         uses: docker/login-action@v1
