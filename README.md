@@ -1,32 +1,37 @@
 # dpc
-This repo contains the code for ingesting data from Protezione Civile (temperature and radar map) to TDM.
 
-##Docker Build
-Run:
+This repo contains the code for ingesting precipitation and temperature data
+from [Protezione Civile meteorological data
+service](http://www.protezionecivile.gov.it/attivita-rischi/meteo-idro/attivita/previsione-prevenzione/centro-funzionale-centrale-rischio-meteo-idrogeologico/monitoraggio-sorveglianza/mappa-radar)
+to the TDM polystore.
+
+## Docker Build
+
+Pre-built images are [provided on Docker
+Hub](https://hub.docker.com/repository/docker/tdmproject/dpc_ingestor/).
+
+To build your own image run:
 ```
 docker build -t tdmproject/dpc_ingestor -f docker/Dockerfile .
 ```
 
 ## Example
-Let's ingest radar data from Protezione Civile. First of all, start up the services:
+
+You can run the polystore locally and ingest some data. First of all, start up
+the services:
 
 ```
-  docker-compose -f docker/docker-compose.yml up -d
+wget -O docker/docker-compose.base.yml https://raw.githubusercontent.com/tdm-project/tdm-polystore/develop/docker/docker-compose.base.yml
+wget -O docker/settings.conf https://raw.githubusercontent.com/tdm-project/tdm-polystore/develop/docker/settings.conf
+docker-compose -f docker/docker-compose.base.yml up -d
 ```
 
-Then create the bucket:
-  
-```
-  docker run --rm --network docker_default --entrypoint s3cmd d3fk/s3cmd  --no-ssl --host=minio:9000 --host-bucket= --access_key=tdm-user --secret_key=tdm-user-s3 mb s3://tdm-public
-```
+Now run the ingestor. Here we'll grab temperature data from the DPC for last 12
+hours.
 
-then retrieve the auth token:
 ```
-  AUTH_TOKEN=$(docker-compose -f docker/docker-compose.yml logs web | awk 'match($0, /token is (\w+)/,_match) {a=_match[1]} END {print a}')
-```
-
-Finally, run the ingestor:
-```
-  docker run --rm --network docker_default tdmproject/dpc_ingestor -u http://web:8000/api/v0.0 --auth-token ${AUTH_TOKEN} temperature
+docker run --rm --network docker_tdmq tdmproject/dpc_ingestor \
+    temperature \
+    "http://web:8000/api/v0.0/" "$(sed -n -e '/TDMQ_AUTH_TOKEN/s/.*=//p' docker/settings.conf)"  ingest --strictly-after $(date -d '12 hour ago' --iso-8601=minutes --utc)
 ```
 
