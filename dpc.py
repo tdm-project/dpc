@@ -493,7 +493,7 @@ async def write_to_destination(destination: Source, downloads_ary: Iterable[Dict
                     '\n\t'.join(t.isoformat() for t in times))
 
 
-async def ingest_products(destination: Source, strictly_after: datetime, batch_size: int=20, max_batches: int=4) -> None:
+async def ingest_products(destination: Source, strictly_after: datetime, batch_size: int=20, max_batches: int=3) -> None:
     outstanding_batch_semaphore = asyncio.Semaphore(max_batches)
     outstanding_batches = 0
 
@@ -685,7 +685,7 @@ def dpc(ctx, mode: str, tdmq_endpoint: str, tdmq_token: str, override_source_id:
 @dpc.command()
 @click.option('--batch-size', default=20, envvar='DPC_BATCH_SIZE', type=int, show_default=True,
               help="Size of batch of products to be concurrently downloaded and then written.")
-@click.option('--max-batches', default=4, envvar='DPC_MAX_BATCHES', type=int, show_default=True,
+@click.option('--max-batches', default=3, envvar='DPC_MAX_BATCHES', type=int, show_default=True,
               help="Max number of downloaded batches to queue up in memory for writing to the array")
 @click.option('--strictly-after', help="Force the start timestamp for the downloaded products to be downloaded. ISO format.")
 @click.option('--consolidate/--no-consolidate', envvar='DPC_CONSOLIDATE', default=True, show_default=True)
