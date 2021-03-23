@@ -56,7 +56,7 @@ jobs:
           # Gets TDMQ_AUTH_TOKEN from env file
           docker run --rm --network docker_tdmq ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
             --log-level DEBUG temperature \
-            "http://web:8000/api/v0.0/" "$(sed -n -e '/TDMQ_AUTH_TOKEN/s/.*=//p' docker/settings.conf)"  ingest --strictly-after $(date -d '1 hour ago' --iso-8601=minutes --utc)
+            "http://web:8000/api/v0.0/" "$(sed -n -e '/TDMQ_AUTH_TOKEN/s/.*=//p' docker/settings.conf)"  ingest --strictly-after $(date -d '2 hour ago' --iso-8601=minutes --utc)
 
       - name: Login to DockerHub
         uses: docker/login-action@v1
