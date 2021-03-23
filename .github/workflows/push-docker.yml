@@ -49,6 +49,7 @@ jobs:
             sleep 1
           done
       - name: Test
+        run: |
           docker run --rm --network docker_tdmq ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
             --log-level DEBUG temperature \
             "http://web:8000/api/v0.0/" "${TDMQ_AUTH_TOKEN}" ingest --strictly-after $(date -d '1 hour ago' --iso-8601=minutes --utc)
