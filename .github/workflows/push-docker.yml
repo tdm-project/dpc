@@ -37,9 +37,10 @@ jobs:
           wget -O docker/docker-compose.base.yml https://raw.githubusercontent.com/tdm-project/tdm-polystore/develop/docker/docker-compose.base.yml
           wget -O docker/settings.conf https://raw.githubusercontent.com/tdm-project/tdm-polystore/develop/docker/settings.conf
 
-      - name: Test
+      - name: Start tdm-polystore
         run: |
           source docker/settings.conf
+          docker-compose -f docker/docker-compose.base.yml pull
           docker-compose -f docker/docker-compose.base.yml up -d
           # wait for the services to become healthy
           for i in {1..30}; do
@@ -47,7 +48,7 @@ jobs:
             echo "Waiting for TDMq to become ready..."
             sleep 1
           done
-          echo "Running DPC ingestor"
+      - name: Test
           docker run --rm --network docker_tdmq ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
             --log-level DEBUG temperature \
             "http://web:8000/api/v0.0/" "${TDMQ_AUTH_TOKEN}" ingest --strictly-after $(date -d '1 hour ago' --iso-8601=minutes --utc)
