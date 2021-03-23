@@ -54,7 +54,7 @@ jobs:
       - name: Test
         run: |
           # Gets TDMQ_AUTH_TOKEN from env file
-          docker run --rm --network docker_tdmq ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} --env-file docker/settings.conf \
+          docker run --rm --network docker_tdmq --env-file docker/settings.conf ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
             --log-level DEBUG temperature \
             "http://web:8000/api/v0.0/" ingest --strictly-after $(date -d '1 hour ago' --iso-8601=minutes --utc)
 
