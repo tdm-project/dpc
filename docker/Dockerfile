@@ -1,4 +1,4 @@
-FROM tdmproject/tdmq-client:dev-410
+FROM tdmproject/tdmq-client:master-652
 
 ENV DPC_HOME /opt/dpc
 
