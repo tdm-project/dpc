@@ -157,7 +157,7 @@ class DPCclient:
     """
     API docs: https://dpc-radar.readthedocs.io/it/latest/api.html
 
-    /findAvaiableProducts   GET  Restituisce la lista dei prodotti disponibili (types)
+    /findAvailableProducts   GET  Restituisce la lista dei prodotti disponibili (types)
     /findLastProductByType GET  Restituisce il timestamp dell’ultima acquisizione per il prodotto specificato
     /existsProduct         GET  Verifica se esiste una acquisizione del prodotto specificato al timestamp specificato
     /downloadProduct       POST Richiede il download dell’acquisizione del prodotto specificato al timestamp specificato
@@ -165,7 +165,7 @@ class DPCclient:
     """
 
     BASE_URL = \
-        'http://www.protezionecivile.gov.it/wide-api/wide/product/'
+        'https://radar-api.protezionecivile.it/wide/product/'
 
     def __init__(self, conn_limit: int=4):
         self._logger = logging.getLogger("DPCclient")
@@ -203,7 +203,7 @@ class DPCclient:
 
     @dpc_retry
     async def available_products(self) -> List[str]:
-        # findAvaiableProducts
+        # findAvailableProducts
         # {
         #  "total" : 13,
         #  "types" : [ "AMV", "LTG", "SRT6",
@@ -212,7 +212,7 @@ class DPCclient:
         #              "RADAR_STATUS", "SRT24",
         #              "SRI", "SRT12" ]
         # }
-        url = self.BASE_URL + "findAvaiableProducts"
+        url = self.BASE_URL + "findAvailableProducts"
         async with self._session.get(url) as response:
             data = await response.json()
             self._count_generic_request(len(data))
