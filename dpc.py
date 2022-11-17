@@ -273,7 +273,7 @@ class DPCclient:
                 if response.status >= 400:
                     # Error
                     content = await response.json()
-                    if response.status == 500:
+                    if response.status < 500:
                         # The DPC service returns status code 500 when it doesn't find what you're looking for,
                         # so we handle this code specifically.
                         # the message when the product is missing looks like:
